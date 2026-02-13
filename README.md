@@ -1,2 +1,0 @@
-# AMGstodio
-Studio for me 
