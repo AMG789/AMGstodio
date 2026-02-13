@@ -1267,3 +1267,956 @@
             <!-- History Section -->
             <div id="history" class="section">
                 <div class="card">
+                    <div class="card-header">
+                        <h2 class="card-title">📚 <span data-en="My History" data-ar="أرشيفي">My History</span></h2>
+                    </div>
+                    <p style="color: #64748b; margin-bottom: 20px;" data-en="Select a date to view your past records" data-ar="اختر تاريخاً لعرض سجلاتك السابقة">Select a date to view your past records</p>
+                    
+                    <div class="history-grid" id="historyGrid"></div>
+                    
+                    <div class="empty-state" id="emptyHistory" style="display: none;">
+                        <div class="empty-icon">📭</div>
+                        <h3 data-en="No History Found" data-ar="لا يوجد أرشيف">No History Found</h3>
+                        <p data-en="Your records will appear here" data-ar="سجلاتك ستظهر هنا">Your records will appear here</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Firebase SDK -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+        import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, updateProfile } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+        import { getFirestore, collection, doc, setDoc, getDoc, getDocs, query, where, orderBy, deleteDoc, updateDoc, Timestamp, limit } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+        // Firebase Configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyBVho_BuuRkfRbuQzW2PWDYnJxxmC5yyAc",
+            authDomain: "gate-management-system-44cf5.firebaseapp.com",
+            projectId: "gate-management-system-44cf5",
+            storageBucket: "gate-management-system-44cf5.appspot.com",
+            messagingSenderId: "859920522798",
+            appId: "1:859920522798:web:d3ea86a373ce25ab0dc9bf"
+        };
+
+        // Initialize Firebase
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+
+        // Global State
+        let currentUser = null;
+        let currentUserData = null;
+        let currentLang = localStorage.getItem('language') || 'en';
+        let selectedDate = formatDate(new Date());
+
+        // Initialize App
+        document.addEventListener('DOMContentLoaded', () => {
+            initApp();
+        });
+
+        function initApp() {
+            checkAuthState();
+            applyLanguage();
+            setupEventListeners();
+            
+            // Hide loading screen after 1 second
+            setTimeout(() => {
+                document.getElementById('loadingScreen').classList.add('hidden');
+            }, 1000);
+        }
+
+        // Utility Functions
+        function formatDate(date) {
+            const d = new Date(date);
+            return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        }
+
+        function formatDateDisplay(dateStr) {
+            const d = new Date(dateStr);
+            const options = { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' };
+            return d.toLocaleDateString(currentLang === 'ar' ? 'ar-SA' : 'en-US', options);
+        }
+
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.textContent = message;
+            container.appendChild(toast);
+            
+            setTimeout(() => {
+                toast.remove();
+            }, 3000);
+        }
+
+        // Auth State Management
+        function checkAuthState() {
+            onAuthStateChanged(auth, async (user) => {
+                if (user) {
+                    currentUser = user;
+                    await loadUserData(user.uid);
+                    showMainApp();
+                } else {
+                    showLoginScreen();
+                }
+            });
+        }
+
+        async function loadUserData(uid) {
+            try {
+                const userDoc = await getDoc(doc(db, 'users', uid));
+                if (userDoc.exists()) {
+                    currentUserData = userDoc.data();
+                } else {
+                    currentUserData = {
+                        name: currentUser.displayName || currentUser.email.split('@')[0],
+                        email: currentUser.email,
+                        role: 'user',
+                        createdAt: Timestamp.now()
+                    };
+                    await setDoc(doc(db, 'users', uid), currentUserData);
+                }
+            } catch (error) {
+                console.error('Error loading user data:', error);
+                showToast('Error loading user data', 'error');
+            }
+        }
+
+        function showLoginScreen() {
+            document.getElementById('loginScreen').style.display = 'flex';
+            document.getElementById('mainApp').classList.remove('active');
+        }
+
+        function showMainApp() {
+            document.getElementById('loginScreen').style.display = 'none';
+            document.getElementById('mainApp').classList.add('active');
+            
+            // Update UI
+            const displayName = currentUserData?.name || currentUser.email;
+            document.getElementById('userName').textContent = displayName;
+            document.getElementById('userRole').textContent = `@${currentUserData?.role || 'user'}`;
+            document.getElementById('userAvatar').textContent = displayName.charAt(0).toUpperCase();
+            
+            // Initialize dashboard
+            startClock();
+            updateDateDisplay();
+            setDefaultTimes();
+            loadAllData();
+        }
+
+        function startClock() {
+            updateDateTime();
+            setInterval(updateDateTime, 1000);
+        }
+
+        function updateDateTime() {
+            const now = new Date();
+            const options = { 
+                weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+                hour: '2-digit', minute: '2-digit', second: '2-digit'
+            };
+            document.getElementById('currentDateTime').textContent = 
+                now.toLocaleString(currentLang === 'ar' ? 'ar-SA' : 'en-US', options);
+        }
+
+        function updateDateDisplay() {
+            document.getElementById('displayDate').textContent = formatDateDisplay(selectedDate);
+            document.getElementById('datePicker').value = selectedDate;
+        }
+
+        function setDefaultTimes() {
+            const now = new Date().toTimeString().slice(0, 5);
+            const timeInputs = ['fcpTimeOut', 'fnqTimeIn', 'visitTimeIn', 'gpTime', 'gpReturnTime'];
+            timeInputs.forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.value = now;
+            });
+        }
+
+        // Auth Functions
+        window.showLoginTab = function(tab) {
+            document.querySelectorAll('.login-tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.login-form').forEach(f => f.classList.remove('active'));
+            
+            event.target.classList.add('active');
+            document.getElementById(tab + 'Form').classList.add('active');
+            
+            document.getElementById('loginError').classList.remove('show');
+            document.getElementById('registerError').classList.remove('show');
+        };
+
+        window.handleLogin = async function(e) {
+            e.preventDefault();
+            
+            const email = document.getElementById('loginEmail').value;
+            const password = document.getElementById('loginPassword').value;
+            
+            try {
+                await signInWithEmailAndPassword(auth, email, password);
+                showToast('Welcome back!', 'success');
+            } catch (error) {
+                const errorMsg = document.getElementById('loginError');
+                errorMsg.textContent = getErrorMessage(error.code);
+                errorMsg.classList.add('show');
+                showToast('Login failed', 'error');
+            }
+        };
+
+        window.handleRegister = async function(e) {
+            e.preventDefault();
+            
+            const name = document.getElementById('regName').value;
+            const email = document.getElementById('regEmail').value;
+            const password = document.getElementById('regPassword').value;
+            
+            try {
+                const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+                
+                await updateProfile(userCredential.user, { displayName: name });
+                
+                await setDoc(doc(db, 'users', userCredential.user.uid), {
+                    name: name,
+                    email: email,
+                    role: 'user',
+                    createdAt: Timestamp.now()
+                });
+                
+                showToast('Account created successfully!', 'success');
+                
+            } catch (error) {
+                const errorMsg = document.getElementById('registerError');
+                errorMsg.textContent = getErrorMessage(error.code);
+                errorMsg.classList.add('show');
+                showToast('Registration failed', 'error');
+            }
+        };
+
+        window.logout = async function() {
+            const confirmMsg = currentLang === 'ar' ? 'هل أنت متأكد من تسجيل الخروج؟' : 'Are you sure you want to logout?';
+            if (confirm(confirmMsg)) {
+                await signOut(auth);
+                showToast('Logged out successfully', 'info');
+            }
+        };
+
+        function getErrorMessage(code) {
+            const messages = {
+                'auth/user-not-found': currentLang === 'ar' ? 'المستخدم غير موجود' : 'User not found',
+                'auth/wrong-password': currentLang === 'ar' ? 'كلمة المرور غير صحيحة' : 'Wrong password',
+                'auth/email-already-in-use': currentLang === 'ar' ? 'البريد مستخدم' : 'Email already in use',
+                'auth/weak-password': currentLang === 'ar' ? 'كلمة المرور ضعيفة' : 'Weak password',
+                'auth/invalid-email': currentLang === 'ar' ? 'بريد غير صالح' : 'Invalid email',
+                'auth/too-many-requests': currentLang === 'ar' ? 'محاولات كثيرة، حاول لاحقاً' : 'Too many attempts, try later'
+            };
+            return messages[code] || (currentLang === 'ar' ? 'حدث خطأ' : 'An error occurred');
+        }
+
+        // Language Functions
+        window.toggleLanguage = function() {
+            currentLang = currentLang === 'en' ? 'ar' : 'en';
+            localStorage.setItem('language', currentLang);
+            applyLanguage();
+            showToast(currentLang === 'ar' ? 'تم تغيير اللغة' : 'Language changed', 'success');
+        };
+
+        function applyLanguage() {
+            document.body.dir = currentLang === 'ar' ? 'rtl' : 'ltr';
+            document.querySelectorAll('[data-en][data-ar]').forEach(el => {
+                el.textContent = el.getAttribute(`data-${currentLang}`);
+            });
+            
+            const langBtn = document.getElementById('langText');
+            if (langBtn) {
+                langBtn.textContent = currentLang === 'en' ? 'العربية' : 'English';
+            }
+            
+            // Refresh date display
+            updateDateTime();
+            updateDateDisplay();
+        }
+
+        // Navigation
+        window.showSection = function(sectionId) {
+            if (sectionId === 'history') {
+                loadHistory();
+            }
+            
+            document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            
+            const section = document.getElementById(sectionId);
+            const btn = event.target.closest('.tab-btn');
+            
+            if (section) section.classList.add('active');
+            if (btn) btn.classList.add('active');
+        };
+
+        window.changeDate = function(date) {
+            selectedDate = date;
+            updateDateDisplay();
+            loadAllData();
+            showToast(`${currentLang === 'ar' ? 'تم تغيير التاريخ إلى' : 'Date changed to'} ${formatDateDisplay(date)}`, 'info');
+        };
+
+        window.goToToday = function() {
+            selectedDate = formatDate(new Date());
+            updateDateDisplay();
+            loadAllData();
+            showToast(currentLang === 'ar' ? 'العودة إلى اليوم' : 'Back to today', 'success');
+        };
+
+        window.showHistory = function() {
+            loadHistory();
+            document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.getElementById('history').classList.add('active');
+        };
+
+        // Database Operations
+        async function saveRecord(collectionName, data) {
+            try {
+                const id = `${collectionName}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                const recordData = {
+                    ...data,
+                    id: id,
+                    userId: currentUser.uid,
+                    userName: currentUserData?.name || currentUser.email,
+                    userEmail: currentUser.email,
+                    createdAt: Timestamp.now(),
+                    date: selectedDate
+                };
+                
+                await setDoc(doc(db, 'records', selectedDate, collectionName, id), recordData);
+                return id;
+            } catch (error) {
+                console.error(`Error saving ${collectionName}:`, error);
+                throw error;
+            }
+        }
+
+        async function getRecords(collectionName) {
+            try {
+                const q = query(
+                    collection(db, 'records', selectedDate, collectionName),
+                    where('userId', '==', currentUser.uid),
+                    orderBy('createdAt', 'desc')
+                );
+                
+                const snapshot = await getDocs(q);
+                return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            } catch (error) {
+                console.error(`Error getting ${collectionName}:`, error);
+                return [];
+            }
+        }
+
+        async function updateRecord(collectionName, id, data) {
+            try {
+                await updateDoc(doc(db, 'records', selectedDate, collectionName, id), {
+                    ...data,
+                    updatedAt: Timestamp.now()
+                });
+            } catch (error) {
+                console.error(`Error updating ${collectionName}:`, error);
+                throw error;
+            }
+        }
+
+        async function deleteRecord(collectionName, id) {
+            try {
+                await deleteDoc(doc(db, 'records', selectedDate, collectionName, id));
+            } catch (error) {
+                console.error(`Error deleting ${collectionName}:`, error);
+                throw error;
+            }
+        }
+
+        // FCP Functions
+        window.addFCP = async function() {
+            const truckNo = document.getElementById('fcpTruckNo').value.trim();
+            const remark = document.getElementById('fcpRemark').value.trim();
+            const timeOut = document.getElementById('fcpTimeOut').value;
+
+            if (!truckNo) {
+                showToast(currentLang === 'ar' ? 'أدخل رقم الشاحنة' : 'Enter truck number', 'error');
+                return;
+            }
+
+            try {
+                await saveRecord('fcp', { truckNo, remark, timeOut, type: 'fcp' });
+                
+                document.getElementById('fcpTruckNo').value = '';
+                document.getElementById('fcpRemark').value = '';
+                setDefaultTimes();
+                
+                await loadFCPData();
+                showToast(currentLang === 'ar' ? 'تم تسجيل الخروج بنجاح' : 'Exit recorded successfully', 'success');
+            } catch (error) {
+                showToast(currentLang === 'ar' ? 'خطأ في الحفظ' : 'Save error', 'error');
+            }
+        };
+
+        async function loadFCPData() {
+            const records = await getRecords('fcp');
+            const tbody = document.getElementById('fcpTableBody');
+            
+            if (records.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="5" class="empty-state"><div class="empty-icon">📭</div>${currentLang === 'ar' ? 'لا توجد سجلات' : 'No records'}</td></tr>`;
+                updateStats();
+                return;
+            }
+
+            tbody.innerHTML = records.map((record, index) => `
+                <tr>
+                    <td>${index + 1}</td>
+                    <td><strong>${record.truckNo}</strong></td>
+                    <td>${record.remark || '-'}</td>
+                    <td>${record.timeOut}</td>
+                    <td class="action-btns">
+                        <button class="btn-action btn-delete" onclick="deleteFCP('${record.id}')" title="Delete">🗑️</button>
+                    </td>
+                </tr>
+            `).join('');
+            
+            updateStats();
+        }
+
+        window.deleteFCP = async function(id) {
+            const confirmMsg = currentLang === 'ar' ? 'هل أنت متأكد من الحذف؟' : 'Are you sure?';
+            if (!confirm(confirmMsg)) return;
+            
+            try {
+                await deleteRecord('fcp', id);
+                await loadFCPData();
+                showToast(currentLang === 'ar' ? 'تم الحذف' : 'Deleted', 'success');
+            } catch (error) {
+                showToast(currentLang === 'ar' ? 'خطأ في الحذف' : 'Delete error', 'error');
+            }
+        };
+
+        // FNQ Functions
+        window.addFNQ = async function() {
+            const truckNo = document.getElementById('fnqTruckNo').value.trim();
+            const gatePass = document.getElementById('fnqGatePass').value.trim();
+            const driver = document.getElementById('fnqDriver').value.trim();
+            const timeIn = document.getElementById('fnqTimeIn').value;
+
+            if (!truckNo || !timeIn) {
+                showToast(currentLang === 'ar' ? 'أدخل رقم الشاحنة والوقت' : 'Enter truck number and time', 'error');
+                return;
+            }
+
+            try {
+                await saveRecord('fnq', {
+                    truckNo, gatePass, driver, timeIn,
+                    timeOut: null, status: 'inside'
+                });
+
+                document.getElementById('fnqTruckNo').value = '';
+                document.getElementById('fnqGatePass').value = '';
+                document.getElementById('fnqDriver').value = '';
+                setDefaultTimes();
+
+                await loadFNQData();
+                showToast(currentLang === 'ar' ? 'تم تسجيل الدخول' : 'Entry recorded', 'success');
+            } catch (error) {
+                showToast(currentLang === 'ar' ? 'خطأ في الحفظ' : 'Save error', 'error');
+            }
+        };
+
+        async function loadFNQData() {
+            const records = await getRecords('fnq');
+            const insideBody = document.getElementById('fnqTableBody');
+            const completedBody = document.getElementById('fnqCompletedBody');
+            
+            const inside = records.filter(r => r.status === 'inside');
+            const completed = records.filter(r => r.status === 'completed');
+
+            // Inside table
+            if (inside.length === 0) {
+                insideBody.innerHTML = `<tr><td colspan="6" class="empty-state"><div class="empty-icon">🚛</div>${currentLang === 'ar' ? 'لا توجد شاحنات داخل' : 'No trucks inside'}</td></tr>`;
+            } else {
+                insideBody.innerHTML = inside.map((record, index) => `
+                    <tr>
+                        <td>${index + 1}</td>
+                        <td><strong>${record.truckNo}</strong></td>
+                        <td>${record.gatePass || '-'}</td>
+                        <td>${record.driver || '-'}</td>
+                        <td><span class="status-badge status-in">${record.timeIn}</span></td>
+                        <td class="action-btns">
+                            <button class="btn-action btn-edit" onclick="editFNQ('${record.id}')" title="Edit">✏️</button>
+                            <button class="btn-action btn-exit" onclick="exitFNQ('${record.id}')" title="Exit">🚪</button>
+                            <button class="btn-action btn-delete" onclick="deleteFNQ('${record.id}')" title="Delete">🗑️</button>
+                        </td>
+                    </tr>
+                `).join('');
+            }
+
+            // Completed table
+            if (completed.length === 0) {
+                completedBody.innerHTML = `<tr><td colspan="6" class="empty-state"><div class="empty-icon">📋</div>${currentLang === 'ar' ? 'لا يوجد خروج مكتمل' : 'No completed exits'}</td></tr>`;
+            } else {
+                completedBody.innerHTML = completed.map((record, index) => `
+                    <tr>
+                        <td>${index + 1}</td>
+                        <td><strong>${record.truckNo}</strong></td>
+                        <td>${record.gatePass || '-'}</td>
+                        <td>${record.timeIn}</td>
+                        <td><span class="status-badge status-out">${record.timeOut}</span></td>
+                        <td><strong>${calculateDuration(record.timeIn, record.timeOut)}</strong></td>
+                    </tr>
+                `).join('');
+            }
+            
+            updateStats();
+        }
+
+        window.editFNQ = async function(id) {
+            const records = await getRecords('fnq');
+            const record = records.find(r => r.id === id);
+            if (!record) return;
+
+            document.getElementById('editFnqId').value = id;
+            document.getElementById('editFnqTruckNo').value = record.truckNo;
+            document.getElementById('editFnqGatePass').value = record.gatePass || '';
+            document.getElementById('editFnqDriver').value = record.driver || '';
+            document.getElementById('editFnqTimeIn').value = record.timeIn;
+            
+            document.getElementById('fnqEditForm').classList.add('active');
+            document.getElementById('fnqEntryForm').style.display = 'none';
+        };
+
+        window.saveFNQEdit = async function() {
+            const id = document.getElementById('editFnqId').value;
+            const data = {
+                truckNo: document.getElementById('editFnqTruckNo').value.trim(),
+                gatePass: document.getElementById('editFnqGatePass').value.trim(),
+                driver: document.getElementById('editFnqDriver').value.trim(),
+                timeIn: document.getElementById('editFnqTimeIn').value
+            };
+
+            try {
+                await updateRecord('fnq', id, data);
+                cancelFNQEdit();
+                await loadFNQData();
+                showToast(currentLang === 'ar' ? 'تم التحديث' : 'Updated', 'success');
+            } catch (error) {
+                showToast(currentLang === 'ar' ? 'خطأ في التحديث' : 'Update error', 'error');
+            }
+        };
+
+        window.cancelFNQEdit = function() {
+            document.getElementById('fnqEditForm').classList.remove('active');
+            document.getElementById('fnqEntryForm').style.display = 'block';
+        };
+
+        window.exitFNQ = async function(id) {
+            const timeOut = prompt(
+                currentLang === 'ar' ? 'أدخل وقت الخروج (HH:MM):' : 'Enter exit time (HH:MM):',
+                new Date().toTimeString().slice(0, 5)
+            );
+            if (!timeOut) return;
+
+            try {
+                await updateRecord('fnq', id, { timeOut, status: 'completed' });
+                await loadFNQData();
+                showToast(currentLang === 'ar' ? 'تم تسجيل الخروج' : 'Exit recorded', 'success');
+            } catch (error) {
+                showToast(currentLang === 'ar' ? 'خطأ' : 'Error', 'error');
+            }
+        };
+
+        window.deleteFNQ = async function(id) {
+            if (!confirm(currentLang === 'ar' ? 'هل أنت متأكد؟' : 'Are you sure?')) return;
+            
+            try {
+                await deleteRecord('fnq', id);
+                await loadFNQData();
+                showToast(currentLang === 'ar' ? 'تم الحذف' : 'Deleted', 'success');
+            } catch (error) {
+                showToast(currentLang === 'ar' ? 'خطأ في الحذف' : 'Delete error', 'error');
+            }
+        };
+
+        // Visits Functions
+        window.addVisit = async function() {
+            const name = document.getElementById('visitName').value.trim();
+            const company = document.getElementById('visitCompany').value.trim();
+            const truck = document.getElementById('visitTruck').value.trim();
+            const destination = document.getElementById('visitDestination').value;
+            const purpose = document.getElementById('visitPurpose').value.trim();
+            const timeIn = document.getElementById('visitTimeIn').value;
+
+            if (!name || !timeIn) {
+                showToast(currentLang === 'ar' ? 'أدخل الاسم والوقت' : 'Enter name and time', 'error');
+                return;
+            }
+
+            try {
+                await saveRecord('visits', {
+                    name, company, truck, destination, purpose, timeIn,
+                    timeOut: null, status: 'inside'
+                });
+
+                document.getElementById('visitName').value = '';
+                document.getElementById('visitCompany').value = '';
+                document.getElementById('visitTruck').value = '';
+                document.getElementById('visitPurpose').value = '';
+                setDefaultTimes();
+
+                await loadVisitsData();
+                showToast(currentLang === 'ar' ? 'تم تسجيل الزيارة' : 'Visit recorded', 'success');
+            } catch (error) {
+                showToast(currentLang === 'ar' ? 'خطأ في الحفظ' : 'Save error', 'error');
+            }
+        };
+
+        async function loadVisitsData() {
+            const records = await getRecords('visits');
+            const currentBody = document.getElementById('visitTableBody');
+            const completedBody = document.getElementById('visitCompletedBody');
+            
+            const inside = records.filter(r => r.status === 'inside');
+            const completed = records.filter(r => r.status === 'completed');
+
+            if (inside.length === 0) {
+                currentBody.innerHTML = `<tr><td colspan="7" class="empty-state"><div class="empty-icon">👥</div>${currentLang === 'ar' ? 'لا توجد زيارات' : 'No visits'}</td></tr>`;
+            } else {
+                currentBody.innerHTML = inside.map((record, index) => `
+                    <tr>
+                        <td>${index + 1}</td>
+                        <td><strong>${record.name}</strong></td>
+                        <td>${record.company || '-'}</td>
+                        <td><span class="dest-badge dest-${record.destination}">${record.destination}</span></td>
+                        <td>${record.purpose || '-'}</td>
+                        <td><span class="status-badge status-in">${record.timeIn}</span></td>
+                        <td class="action-btns">
+                            <button class="btn-action btn-edit" onclick="editVisit('${record.id}')" title="Edit">✏️</button>
+                            <button class="btn-action btn-exit" onclick="exitVisit('${record.id}')" title="Exit">🚪</button>
+                            <button class="btn-action btn-delete" onclick="deleteVisit('${record.id}')" title="Delete">🗑️</button>
+                        </td>
+                    </tr>
+                `).join('');
+            }
+
+            if (completed.length === 0) {
+                completedBody.innerHTML = `<tr><td colspan="7" class="empty-state"><div class="empty-icon">📋</div>${currentLang === 'ar' ? 'لا يوجد مكتمل' : 'No completed'}</td></tr>`;
+            } else {
+                completedBody.innerHTML = completed.map((record, index) => `
+                    <tr>
+                        <td>${index + 1}</td>
+                        <td><strong>${record.name}</strong></td>
+                        <td>${record.company || '-'}</td>
+                        <td><span class="dest-badge dest-${record.destination}">${record.destination}</span></td>
+                        <td>${record.timeIn}</td>
+                        <td><span class="status-badge status-out">${record.timeOut}</span></td>
+                        <td><strong>${calculateDuration(record.timeIn, record.timeOut)}</strong></td>
+                    </tr>
+                `).join('');
+            }
+            
+            updateStats();
+        }
+
+        window.editVisit = async function(id) {
+            const records = await getRecords('visits');
+            const record = records.find(r => r.id === id);
+            if (!record) return;
+
+            document.getElementById('editVisitId').value = id;
+            document.getElementById('editVisitName').value = record.name;
+            document.getElementById('editVisitCompany').value = record.company || '';
+            document.getElementById('editVisitTruck').value = record.truck || '';
+            document.getElementById('editVisitDestination').value = record.destination;
+            document.getElementById('editVisitPurpose').value = record.purpose || '';
+            document.getElementById('editVisitTimeIn').value = record.timeIn;
+            
+            document.getElementById('visitEditForm').classList.add('active');
+            document.getElementById('visitEntryForm').style.display = 'none';
+        };
+
+        window.saveVisitEdit = async function() {
+            const id = document.getElementById('editVisitId').value;
+            const data = {
+                name: document.getElementById('editVisitName').value.trim(),
+                company: document.getElementById('editVisitCompany').value.trim(),
+                truck: document.getElementById('editVisitTruck').value.trim(),
+                destination: document.getElementById('editVisitDestination').value,
+                purpose: document.getElementById('editVisitPurpose').value.trim(),
+                timeIn: document.getElementById('editVisitTimeIn').value
+            };
+
+            try {
+                await updateRecord('visits', id, data);
+                cancelVisitEdit();
+                await loadVisitsData();
+                showToast(currentLang === 'ar' ? 'تم التحديث' : 'Updated', 'success');
+            } catch (error) {
+                showToast(currentLang === 'ar' ? 'خطأ' : 'Error', 'error');
+            }
+        };
+
+        window.cancelVisitEdit = function() {
+            document.getElementById('visitEditForm').classList.remove('active');
+            document.getElementById('visitEntryForm').style.display = 'block';
+        };
+
+        window.exitVisit = async function(id) {
+            const timeOut = prompt(
+                currentLang === 'ar' ? 'أدخل وقت الخروج:' : 'Enter exit time:',
+                new Date().toTimeString().slice(0, 5)
+            );
+            if (!timeOut) return;
+
+            try {
+                await updateRecord('visits', id, { timeOut, status: 'completed' });
+                await loadVisitsData();
+                showToast(currentLang === 'ar' ? 'تم تسجيل الخروج' : 'Exit recorded', 'success');
+            } catch (error) {
+                showToast(currentLang === 'ar' ? 'خطأ' : 'Error', 'error');
+            }
+        };
+
+        window.deleteVisit = async function(id) {
+            if (!confirm(currentLang === 'ar' ? 'هل أنت متأكد؟' : 'Are you sure?')) return;
+            
+            try {
+                await deleteRecord('visits', id);
+                await loadVisitsData();
+                showToast(currentLang === 'ar' ? 'تم الحذف' : 'Deleted', 'success');
+            } catch (error) {
+                showToast(currentLang === 'ar' ? 'خطأ' : 'Error', 'error');
+            }
+        };
+
+        // Gate Pass Functions
+        window.toggleGPReturnTime = function() {
+            const status = document.getElementById('gpStatus').value;
+            document.getElementById('gpReturnGroup').style.display = status === 'returned' ? 'block' : 'none';
+        };
+
+        window.addGatePass = async function() {
+            const number = document.getElementById('gpNumber').value.trim();
+            const time = document.getElementById('gpTime').value;
+            const status = document.getElementById('gpStatus').value;
+            const returnTime = status === 'returned' ? document.getElementById('gpReturnTime').value : null;
+
+            if (!number || !time) {
+                showToast(currentLang === 'ar' ? 'أدخل الرقم والوقت' : 'Enter number and time', 'error');
+                return;
+            }
+
+            try {
+                await saveRecord('gatepass', { number, time, status, returnTime });
+                
+                document.getElementById('gpNumber').value = '';
+                document.getElementById('gpStatus').value = 'active';
+                toggleGPReturnTime();
+                setDefaultTimes();
+                
+                await loadGatePassData();
+                showToast(currentLang === 'ar' ? 'تم الإصدار' : 'Issued', 'success');
+            } catch (error) {
+                showToast(currentLang === 'ar' ? 'خطأ' : 'Error', 'error');
+            }
+        };
+
+        async function loadGatePassData() {
+            const records = await getRecords('gatepass');
+            const tbody = document.getElementById('gpTableBody');
+            
+            if (records.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="6" class="empty-state"><div class="empty-icon">🎫</div>${currentLang === 'ar' ? 'لا توجد تصاريح' : 'No passes'}</td></tr>`;
+                updateStats();
+                return;
+            }
+
+            tbody.innerHTML = records.map((record, index) => `
+                <tr>
+                    <td>${index + 1}</td>
+                    <td><strong>${record.number}</strong></td>
+                    <td>${record.time}</td>
+                    <td><span class="status-badge ${record.status === 'active' ? 'status-in' : 'status-out'}">${record.status}</span></td>
+                    <td>${record.returnTime || '-'}</td>
+                    <td class="action-btns">
+                        <button class="btn-action btn-return" onclick="returnGP('${record.id}')" ${record.status === 'returned' ? 'disabled style="opacity:0.5"' : ''} title="Mark Returned">↩️</button>
+                        <button class="btn-action btn-delete" onclick="deleteGP('${record.id}')" title="Delete">🗑️</button>
+                    </td>
+                </tr>
+            `).join('');
+            
+            updateStats();
+        }
+
+        window.returnGP = async function(id) {
+            const returnTime = prompt(
+                currentLang === 'ar' ? 'وقت العودة:' : 'Return time:',
+                new Date().toTimeString().slice(0, 5)
+            );
+            if (!returnTime) return;
+
+            try {
+                await updateRecord('gatepass', id, { status: 'returned', returnTime });
+                await loadGatePassData();
+                showToast(currentLang === 'ar' ? 'تم تسجيل العودة' : 'Return recorded', 'success');
+            } catch (error) {
+                showToast(currentLang === 'ar' ? 'خطأ' : 'Error', 'error');
+            }
+        };
+
+        window.deleteGP = async function(id) {
+            if (!confirm(currentLang === 'ar' ? 'هل أنت متأكد؟' : 'Are you sure?')) return;
+            
+            try {
+                await deleteRecord('gatepass', id);
+                await loadGatePassData();
+                showToast(currentLang === 'ar' ? 'تم الحذف' : 'Deleted', 'success');
+            } catch (error) {
+                showToast(currentLang === 'ar' ? 'خطأ' : 'Error', 'error');
+            }
+        };
+
+        // Utility Functions
+        async function loadAllData() {
+            await Promise.all([
+                loadFCPData(),
+                loadFNQData(),
+                loadVisitsData(),
+                loadGatePassData()
+            ]);
+        }
+
+        function updateStats() {
+            Promise.all([
+                getRecords('fcp'),
+                getRecords('fnq'),
+                getRecords('visits'),
+                getRecords('gatepass')
+            ]).then(([fcp, fnq, visits, gps]) => {
+                document.getElementById('fcpCount').textContent = fcp.length;
+                document.getElementById('fnqCount').textContent = fnq.filter(r => r.status === 'inside').length;
+                document.getElementById('visitCount').textContent = visits.filter(r => r.status === 'inside').length;
+                document.getElementById('gatePassCount').textContent = gps.filter(r => r.status === 'active').length;
+            });
+        }
+
+        window.searchTable = function(tableId, query) {
+            const table = document.getElementById(tableId);
+            const rows = table.getElementsByTagName('tbody')[0].getElementsByTagName('tr');
+            const lowerQuery = query.toLowerCase();
+
+            for (let row of rows) {
+                if (row.querySelector('.empty-state')) continue;
+                
+                const cells = row.getElementsByTagName('td');
+                let found = false;
+                for (let cell of cells) {
+                    if (cell.textContent.toLowerCase().includes(lowerQuery)) {
+                        found = true;
+                        break;
+                    }
+                }
+                row.style.display = found ? '' : 'none';
+            }
+        };
+
+        function calculateDuration(timeIn, timeOut) {
+            if (!timeIn || !timeOut) return '-';
+            
+            const [h1, m1] = timeIn.split(':').map(Number);
+            const [h2, m2] = timeOut.split(':').map(Number);
+            
+            let diff = (h2 * 60 + m2) - (h1 * 60 + m1);
+            if (diff < 0) diff += 24 * 60;
+            
+            const hours = Math.floor(diff / 60);
+            const mins = diff % 60;
+            
+            return hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
+        }
+
+        // History Functions
+        async function loadHistory() {
+            const grid = document.getElementById('historyGrid');
+            const emptyState = document.getElementById('emptyHistory');
+            
+            // Get last 30 days
+            const dates = [];
+            for (let i = 0; i < 30; i++) {
+                const d = new Date();
+                d.setDate(d.getDate() - i);
+                dates.push(formatDate(d));
+            }
+            
+            // Check which dates have records
+            const datesWithRecords = [];
+            for (let date of dates) {
+                const hasRecords = await checkDateHasRecords(date);
+                if (hasRecords) datesWithRecords.push(date);
+            }
+            
+            if (datesWithRecords.length === 0) {
+                grid.innerHTML = '';
+                emptyState.style.display = 'block';
+                return;
+            }
+            
+            emptyState.style.display = 'none';
+            grid.innerHTML = datesWithRecords.map(date => `
+                <div class="history-card ${date === selectedDate ? 'active' : ''}" onclick="loadHistoryDate('${date}')">
+                    <div style="font-size: 2.5rem; margin-bottom: 10px;">📅</div>
+                    <div class="history-date">${formatDateDisplay(date)}</div>
+                    <div class="history-day">${date}</div>
+                </div>
+            `).join('');
+        }
+
+        async function checkDateHasRecords(date) {
+            try {
+                const collections = ['fcp', 'fnq', 'visits', 'gatepass'];
+                for (let col of collections) {
+                    const q = query(
+                        collection(db, 'records', date, col),
+                        where('userId', '==', currentUser.uid),
+                        limit(1)
+                    );
+                    const snapshot = await getDocs(q);
+                    if (!snapshot.empty) return true;
+                }
+                return false;
+            } catch (error) {
+                return false;
+            }
+        }
+
+        window.loadHistoryDate = function(date) {
+            selectedDate = date;
+            updateDateDisplay();
+            loadAllData();
+            
+            document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.getElementById('fcp').classList.add('active');
+            document.querySelector('.tab-btn.fcp').classList.add('active');
+            
+            showToast(`${currentLang === 'ar' ? 'تم تحميل' : 'Loaded'} ${formatDateDisplay(date)}`, 'success');
+        };
+
+        function setupEventListeners() {
+            // Keyboard shortcuts
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') {
+                    document.querySelectorAll('.edit-panel').forEach(p => p.classList.remove('active'));
+                    document.getElementById('fnqEntryForm').style.display = 'block';
+                    document.getElementById('visitEntryForm').style.display = 'block';
+                }
+            });
+        }
+
+        // Make functions globally available
+        window.loadAllData = loadAllData;
+    </script>
+</body>
+</html>
